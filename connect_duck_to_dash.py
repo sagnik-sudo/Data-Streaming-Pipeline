@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # Path to the DuckDB database file
 db_path = "/Users/sagnikdas/GitHub/Data-Streaming-Pipeline/redset.duckdb"
@@ -8,6 +8,6 @@ engine = create_engine(f"duckdb:///{db_path}")
 
 # Example: Execute a query
 with engine.connect() as connection:
-    result = connection.execute("SELECT 1")
+    result = connection.execute(text("SELECT 1"))
     for row in result:
         print(row)
