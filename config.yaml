@@ -1,0 +1,12 @@
+cookie:
+  expiry_days: 30
+  key: some_signature_key
+  name: some_cookie_name
+credentials:
+  usernames:
+    user1:
+      name: User One
+      password: password1
+    user2:
+      name: User Two
+      password: password2
