@@ -8,6 +8,9 @@ from collections import Counter
 import os
 import hashlib
 import pickle
+from scipy.optimize import curve_fit
+from sklearn.metrics import r2_score
+import numpy as np
 
 # -------------------------------
 # 🔹 USER AUTHENTICATION SYSTEM 🔹
@@ -106,13 +109,13 @@ if "logged_in" not in st.session_state:
 if "username" not in st.session_state:
     st.session_state.username = ""
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "Page 1"  # Default to Page 1
+    st.session_state.current_page = "Live Insights Panel"  # Default to Page 1
 
 # -------------------------------------------
 # 🔹 LOGIN & REGISTRATION PAGE
 # -------------------------------------------
 if not st.session_state.logged_in:
-    st.title("🔐 Login / Register Page")
+    st.title("TJW Redset Dashboard")
     menu = st.sidebar.radio("Choose Action", ["Login", "Register"])
 
     if menu == "Register":
@@ -143,6 +146,23 @@ if not st.session_state.logged_in:
 # -------------------------------------------
 # 🔹 DASHBOARDS (Only Visible After Login)
 # -------------------------------------------
+def linear(x, a, b):
+    return a * x + b
+
+def quadratic(x, a, b, c):
+    return a * x**2 + b * x + c
+
+def exponential(x, a, b):
+    return a * np.exp(b * x)
+
+# Log transformation function
+def log_transform(y):
+    return np.log1p(y)  # log(y + 1) to avoid log(0) errors
+
+# Inverse transformation (for plotting)
+def inverse_log_transform(y_log):
+    return np.expm1(y_log)  # exp(y) - 1
+
 st.sidebar.title(f"👋 Welcome, {st.session_state.username}")
 
 # Logout Button
@@ -183,7 +203,7 @@ async def fetch_data(query: str):
 # 🔹 ADMIN DASHBOARD
 # -------------------------------------------
 if st.session_state.username == ADMIN_USER:
-    st.title("🔴 Admin Dashboard")
+    st.title("🎛️ Command Centre")
     st.subheader("👥 Registered Users")
 
     registered_users = get_registered_users()
@@ -220,20 +240,20 @@ if st.session_state.username == ADMIN_USER:
 # 🔹 PAGE NAVIGATION
 # -------------------------------------------
 st.sidebar.title("📂 Navigation")
-if st.sidebar.button("Go to Page 1"):
-    st.session_state.current_page = "Page 1"
+if st.sidebar.button("Live Insights Panel"):
+    st.session_state.current_page = "Live Insights Panel"
     st.rerun()
 
-if st.sidebar.button("Go to Page 2"):
-    st.session_state.current_page = "Page 2"
+if st.sidebar.button("Overview Panel"):
+    st.session_state.current_page = "Overview Panel"
     st.rerun()
 
 # -------------------------------------------
 # 🔹 PAGE 1: Was Cached Distribution
 # -------------------------------------------
-if st.session_state.current_page == "Page 1":
+if st.session_state.current_page == "Live Insights Panel":
     st.title("📊 Page 1: Was Cached Distribution")
-    df = run_async_query("SELECT * FROM redset_raw LIMIT 1000")
+    df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
 
     cached_count = df["was_cached"].value_counts().reset_index()
     cached_count.columns = ["was_cached", "count"]
@@ -243,10 +263,139 @@ if st.session_state.current_page == "Page 1":
 # -------------------------------------------
 # 🔹 PAGE 2: Top 20 Most Used Tables
 # -------------------------------------------
-elif st.session_state.current_page == "Page 2":
+elif st.session_state.current_page == "Overview Panel":
     st.title("📈 Page 2: Top 20 Most Used Tables")
-    df = run_async_query("SELECT * FROM redset_raw LIMIT 1000")
+    df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
 
     fig, ax = plt.subplots()
     ax.bar(["Table1", "Table2"], [10, 20])  # Example data
     st.pyplot(fig)
+
+    st.title("📊 Top K Tables")
+
+    # Date range selector
+    start_date = st.date_input("Start Date")
+    end_date = st.date_input("End Date")
+
+    if start_date and end_date:
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        query = f"""
+        SELECT * FROM public.top_k_tables_per_day 
+        WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}';
+        """
+    else:
+        query = "SELECT * FROM public.top_k_tables_per_day"
+
+    # Fetch Data
+    df = run_async_query(query)
+
+    if not df.empty:
+        # Let the user select how many top tables to display
+        top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
+
+        df_grouped = df.groupby('table_id')[['count', 'percentage']].sum().reset_index()
+        df_grouped = df_grouped.sort_values(by='count', ascending=False)
+
+        # Calculate overall percentage for the date range
+        total_count = df_grouped['count'].sum()
+        df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
+
+        # Limit to top_k tables
+        df_grouped = df_grouped.head(top_k)
+
+        plt.figure(figsize=(10, 6))
+        bars = plt.bar(df_grouped['table_id'], df_grouped['count'])
+        plt.xlabel('Table ID')
+        plt.ylabel('Query Count')
+        plt.title('Top K Tables')
+        plt.xticks(rotation=90)
+
+        # Display percentage on top of bars diagonally
+        for bar, percentage in zip(bars, df_grouped['overall_percentage']):
+            plt.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f'{percentage:.2f}%',
+                ha='center',
+                va='bottom',
+                rotation=45
+            )
+
+        st.pyplot(plt)
+
+    else:
+        st.write("⚠️ No data available for the selected date range.")
+
+    # -------------------------------------------
+    # 🔹 Compile Time vs Number of Joins (With Log Transformation)
+    # -------------------------------------------
+    st.title("⏳ Compile Time vs Number of Joins (Log-Transformed)")
+
+    # Fetch data for the visualization
+    query_compile_time_vs_joins = """
+        SELECT num_joins AS x, compile_duration_ms AS y 
+        FROM public.redset_main 
+        WHERE query_type = 'select' 
+        AND num_joins IS NOT NULL 
+        AND compile_duration_ms IS NOT NULL;
+    """
+    df_compile_time_vs_joins = run_async_query(query_compile_time_vs_joins)
+
+    if not df_compile_time_vs_joins.empty:
+        x = df_compile_time_vs_joins["x"].values
+        y = df_compile_time_vs_joins["y"].values
+
+        # Apply log transformation to y
+        y_log = log_transform(y)
+
+        # Fit models on transformed data
+        try:
+            popt_linear, _ = curve_fit(linear, x, y_log)
+            y_pred_linear = inverse_log_transform(linear(x, *popt_linear))
+            r2_linear = r2_score(y, y_pred_linear)
+        except:
+            r2_linear = -np.inf
+
+        try:
+            popt_quadratic, _ = curve_fit(quadratic, x, y_log)
+            y_pred_quadratic = inverse_log_transform(quadratic(x, *popt_quadratic))
+            r2_quadratic = r2_score(y, y_pred_quadratic)
+        except:
+            r2_quadratic = -np.inf
+
+        try:
+            popt_exponential, _ = curve_fit(exponential, x, y_log, maxfev=10000)
+            y_pred_exponential = inverse_log_transform(exponential(x, *popt_exponential))
+            r2_exponential = r2_score(y, y_pred_exponential)
+        except:
+            r2_exponential = -np.inf
+
+        # Select the best-fitting model
+        best_fit = max(
+            [("Linear", r2_linear, y_pred_linear if r2_linear != -np.inf else None), 
+            ("Quadratic", r2_quadratic, y_pred_quadratic if r2_quadratic != -np.inf else None), 
+            ("Exponential", r2_exponential, y_pred_exponential if r2_exponential != -np.inf else None)], 
+            key=lambda x: x[1]
+        )
+        
+        best_model, best_r2, best_y_pred = best_fit
+
+        # Plot
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.scatter(x, y, label="Data Points", color="blue", alpha=0.6)
+
+        if best_y_pred is not None:
+            ax.plot(x, best_y_pred, label=f"Best Fit: {best_model} (R²={best_r2:.3f})", color="red", linewidth=2)
+
+        ax.set_xlabel("Number of Joins")
+        ax.set_ylabel("Compile Duration (ms) (Log-Transformed)")
+        ax.set_title("Compile Time vs Number of Joins (Log-Transformed)")
+        ax.legend()
+        
+        st.pyplot(fig)
+
+        st.write(f"📈 Best Fit Model: **{best_model}** with R² = **{best_r2:.3f}**")
+        
+    else:
+        st.write("⚠️ No data available for Compile Time vs Number of Joins.")
