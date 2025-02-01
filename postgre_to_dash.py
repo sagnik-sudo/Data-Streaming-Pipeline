@@ -11,6 +11,11 @@ import pickle
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import numpy as np
+from datetime import date, timedelta
+
+
+# Set Page Layout & Dark Theme
+st.set_page_config(page_title="TJW Dash", layout="wide", menu_items=None)
 
 # -------------------------------
 # 🔹 USER AUTHENTICATION SYSTEM 🔹
@@ -133,7 +138,7 @@ if not st.session_state.logged_in:
         st.subheader("🔑 User Login")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        if st.button("Login"):
+        if st.button("Login", use_container_width=True):
             if validate_credentials(username, password):
                 st.session_state.logged_in = True
                 st.session_state.username = username
@@ -163,14 +168,6 @@ def log_transform(y):
 def inverse_log_transform(y_log):
     return np.expm1(y_log)  # exp(y) - 1
 
-st.sidebar.title(f"👋 Welcome, {st.session_state.username}")
-
-# Logout Button
-if st.sidebar.button("Logout"):
-    st.session_state.logged_in = False
-    st.session_state.username = ""
-    st.rerun()
-
 # Database Configuration
 DB_CONFIG = {
     'user': 'postgres',
@@ -199,6 +196,7 @@ async def fetch_data(query: str):
         st.error(f"Database error: {e}")
         return pd.DataFrame()
 
+
 # -------------------------------------------
 # 🔹 ADMIN DASHBOARD
 # -------------------------------------------
@@ -209,6 +207,17 @@ if st.session_state.username == ADMIN_USER:
     registered_users = get_registered_users()
     if registered_users:
         df_users = pd.DataFrame({"Username": registered_users})
+        name_mapping = {
+            "sagnik": "Sagnik Das",
+            "admin": "Dashboard Administrator",
+            "aswathy": "Aswathy Marottikal Ramesh",
+            "goutham": "Goutham Muralikrishnan",
+            "muhid": "Muhid Abid Siddiqui",
+            "pranjaly": "Pranjaly Paul"
+        }
+
+        df_users["Full Name"] = df_users["Username"].map(name_mapping).fillna("")
+        df_users.index = df_users.index + 1
         st.dataframe(df_users)
 
         selected_user = st.selectbox("Select a user:", registered_users)
@@ -236,46 +245,198 @@ if st.session_state.username == ADMIN_USER:
                 else:
                     st.error("❌ Unable to delete user.")
 
-# -------------------------------------------
-# 🔹 PAGE NAVIGATION
-# -------------------------------------------
-st.sidebar.title("📂 Navigation")
-if st.sidebar.button("Live Insights Panel"):
-    st.session_state.current_page = "Live Insights Panel"
-    st.rerun()
+# Sidebar - Navigation
 
-if st.sidebar.button("Overview Panel"):
-    st.session_state.current_page = "Overview Panel"
-    st.rerun()
+st.sidebar.title(f"👋 Welcome, {st.session_state.username.capitalize()}")
+# st.sidebar.title("📊 TJW Redset Dashboard")
+page = st.sidebar.radio("Go to", ["Home", "Live Query Stream", "Trends", "Top-K Tables", "Cache Hit Rate", "Compile Time vs Joins"])
 
-# -------------------------------------------
-# 🔹 PAGE 1: Was Cached Distribution
-# -------------------------------------------
-if st.session_state.current_page == "Live Insights Panel":
-    st.title("📊 Page 1: Was Cached Distribution")
-    df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
+# Sidebar - Filters
+st.sidebar.subheader("🔎 Filters")
+# cluster_id = st.sidebar.selectbox("Select Cluster ID", ["All", "Cluster 1", "Cluster 2", "Cluster 3"])
+# Set default start date to 2024-01-01
+default_start = date(2024, 1, 1)
+# Set default end date to 90 days after 2024-01-01
+default_end = default_start + timedelta(days=90)
+date_range = st.sidebar.date_input("Select Date Range", [default_start, default_end])
 
-    cached_count = df["was_cached"].value_counts().reset_index()
-    cached_count.columns = ["was_cached", "count"]
-    fig = px.bar(cached_count, x="was_cached", y="count", title="Query Count by 'was_cached'")
-    st.plotly_chart(fig)
+# Ensure exactly two dates are selected
+if len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    st.error("⚠️ Please select both a start and an end date.")
+    st.stop()  # Stop execution until the user provides both dates
 
-# -------------------------------------------
-# 🔹 PAGE 2: Top 20 Most Used Tables
-# -------------------------------------------
-elif st.session_state.current_page == "Overview Panel":
-    st.title("📈 Page 2: Top 20 Most Used Tables")
-    df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
+# Number input for User ID (default is None)
+user_id = st.sidebar.number_input("Enter User ID (Optional)", min_value=1, step=1, format="%d", value=None)
 
-    fig, ax = plt.subplots()
-    ax.bar(["Table1", "Table2"], [10, 20])  # Example data
-    st.pyplot(fig)
+# Convert None to empty string for handling cases
+user_id = int(user_id) if user_id else None
 
+query_type_options = ["(Select Query Type)", "delete", "update", "unload", "vacuum", "analyze", "other", "select", "copy", "ctas", "insert"]
+
+# Dropdown with optional selection
+query_type = st.sidebar.selectbox("Select Query Type (Optional)", query_type_options)
+
+# Treat the default "(Select Query Type)" as None
+query_type = None if query_type == "(Select Query Type)" else query_type
+
+# Function to load data from Parquet file
+@st.cache_data
+def load_data():
+    return pd.read_parquet("full_sl.parquet").sample(10000, random_state=42)
+
+df = load_data()
+
+
+# Dynamic Content Based on Selected Page
+if page == "Home":
+    # KPI Metrics Section
+    st.markdown("## 🚀 Key Metrics")
+    col1, col2, col3 = st.columns(3)
+    total_queries = run_async_query("SELECT COUNT(*) FROM redset_main")
+    total_queries_count = total_queries.iloc[0, 0]
+    col1.metric("Total Queries Processed", total_queries_count)
+    # Execute SQL query
+    cache_hit_rate_query = run_async_query("SELECT (SUM(was_cached) * 100.0) / COUNT(*) AS cache_hit_rate FROM redset_main")
+
+    # Extract value from the result
+    cache_hit_rate = cache_hit_rate_query.iloc[0, 0]  # Assuming it returns a DataFrame
+
+    # Display in Streamlit
+    col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
+    # Run SQL query to get the average compile time
+    avg_compile_time_query = run_async_query("SELECT COALESCE(compile_duration_ms, 0) AS avg_compile_time FROM redset_main")
+
+    # Extract value from the result
+    avg_compile_time = avg_compile_time_query.iloc[0, 0]  # Assuming it returns a DataFrame
+
+    # Display in Streamlit
+    col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
+elif page == "Trends":
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.title("📊 Was Cached Distribution")
+        df = run_async_query("SELECT * FROM redset_main")
+        cached_count = df["was_cached"].value_counts().reset_index()
+        cached_count.columns = ["was_cached", "count"]
+        fig = px.bar(cached_count, x="was_cached", y="count", title="Query Count by 'was_cached'")
+        st.plotly_chart(fig)
+    with col2:
+        st.title("📊 Query Compilation vs Execution Time (Hourly Aggregation)")
+
+        # Fetch only necessary columns
+        query = """
+            SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
+            FROM redset_main 
+            WHERE arrival_timestamp IS NOT NULL
+        """
+        df = run_async_query(query)
+
+        # Ensure necessary columns exist
+        if {"arrival_timestamp", "compile_duration_ms", "execution_duration_ms"}.issubset(df.columns):
+            # Convert timestamp to datetime
+            df["arrival_timestamp"] = pd.to_datetime(df["arrival_timestamp"])
+
+            # Group by hour and compute average durations
+            df["hour"] = df["arrival_timestamp"].dt.floor("H")  # Rounds to nearest hour
+            hourly_avg = df.groupby("hour").agg({
+                "compile_duration_ms": "mean",
+                "execution_duration_ms": "mean"
+            }).reset_index()
+
+            # Create a line chart
+            fig = px.line(
+                hourly_avg, 
+                x="hour", 
+                y=["compile_duration_ms", "execution_duration_ms"], 
+                labels={"value": "Average Duration (ms)", "hour": "Time (Hourly)"},
+                title="Average Query Compilation vs Execution Time Per Hour"
+            )
+
+            st.plotly_chart(fig)
+
+        else:
+            st.warning("Required columns not found in the dataset. Please check the data schema.")
+
+    st.title("📊 Cached vs Non-Cached Query Execution Time")
+
+    # Fetch only necessary columns
+    query = """
+        SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
+        FROM redset_main
+        WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
+        GROUP BY query_type, was_cached
+        ORDER BY avg_execution_time_ms ASC
+    """
+    df = run_async_query(query)
+
+    # Ensure necessary columns exist
+    if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
+        # Convert was_cached to string for better labels
+        df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
+
+        # Create bar chart
+        fig = px.bar(
+            df, 
+            x="query_type", 
+            y="avg_execution_time_ms", 
+            color="was_cached",  # Color by cached vs non-cached
+            barmode="group",  # Group bars side-by-side
+            log_y=True,
+            labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
+            title="Execution Time Comparison: Cached vs Non-Cached Queries"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Required columns not found in the dataset. Please check the data schema.")
+    st.title("📊 Join vs Scan Efficiency")
+
+    # Fetch only necessary columns
+    query = """
+        SELECT query_type, 
+               AVG(num_joins) AS avg_joins, 
+               AVG(num_scans) AS avg_scans 
+        FROM redset_main
+        WHERE query_type IS NOT NULL
+        GROUP BY query_type
+        ORDER BY avg_scans DESC, avg_joins DESC
+    """
+    df = run_async_query(query)
+
+    # Ensure necessary columns exist
+    if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
+        # Melt dataframe for better visualization
+        df_melted = df.melt(
+            id_vars=["query_type"], 
+            value_vars=["avg_joins", "avg_scans"], 
+            var_name="Metric", 
+            value_name="Average Count"
+        )
+
+        # Create a grouped bar chart
+        fig = px.bar(
+            df_melted, 
+            x="query_type", 
+            y="Average Count", 
+            color="Metric",  # Color by joins vs scans
+            barmode="group",  # Group bars side-by-side
+            labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
+            title="Join vs Scan Efficiency by Query Type"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Required columns not found in the dataset. Please check the data schema.")
+
+elif page == "Live Query Stream":
+    pass
+
+elif page == "Top-K Tables":
     st.title("📊 Top K Tables")
-
-    # Date range selector
-    start_date = st.date_input("Start Date")
-    end_date = st.date_input("End Date")
 
     if start_date and end_date:
         start_date_str = start_date.strftime('%Y-%m-%d')
@@ -327,10 +488,16 @@ elif st.session_state.current_page == "Overview Panel":
     else:
         st.write("⚠️ No data available for the selected date range.")
 
+
+elif page == "Cache Hit Rate":
+    st.markdown("## ⚡ Cache Hit Rate Over Time")
+    st.write("(Graph will be implemented here)")
+
+elif page == "Compile Time vs Joins":
     # -------------------------------------------
     # 🔹 Compile Time vs Number of Joins (With Log Transformation)
     # -------------------------------------------
-    st.title("⏳ Compile Time vs Number of Joins (Log-Transformed)")
+    st.title("⏳ Compile Time vs Number of Joins")
 
     # Fetch data for the visualization
     query_compile_time_vs_joins = """
@@ -386,8 +553,8 @@ elif st.session_state.current_page == "Overview Panel":
             ax.plot(x, best_y_pred, label=f"Best Fit: {best_model} (R²={best_r2:.3f})", color="red", linewidth=2)
 
         ax.set_xlabel("Number of Joins")
-        ax.set_ylabel("Compile Duration (ms) (Log-Transformed)")
-        ax.set_title("Compile Time vs Number of Joins (Log-Transformed)")
+        ax.set_ylabel("Compile Duration (ms)")
+        # ax.set_title("Compile Time vs Number of Joins")
         ax.legend()
         
         st.pyplot(fig)
@@ -397,117 +564,291 @@ elif st.session_state.current_page == "Overview Panel":
     else:
         st.write("⚠️ No data available for Compile Time vs Number of Joins.")
 
+
+
+
+# Logout Button
+if st.sidebar.button("Logout"):
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.rerun()
+
+
+
+
+
+# # -------------------------------------------
+# # 🔹 PAGE NAVIGATION
+# # -------------------------------------------
+# st.sidebar.title("📂 Navigation")
+# if st.sidebar.button("Live Insights Panel"):
+#     st.session_state.current_page = "Live Insights Panel"
+#     st.rerun()
+
+# if st.sidebar.button("Overview Panel"):
+#     st.session_state.current_page = "Overview Panel"
+#     st.rerun()
+
+# # -------------------------------------------
+# # 🔹 PAGE 1: Was Cached Distribution
+# # -------------------------------------------
 # if st.session_state.current_page == "Live Insights Panel":
-    st.title("📊 Page 2: Query Compilation vs Execution Time (Hourly Aggregation)")
+#     st.title("📊 Page 1: Was Cached Distribution")
+#     df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
 
-    # Fetch only necessary columns
-    query = """
-        SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
-        FROM redset_main 
-        WHERE arrival_timestamp IS NOT NULL
-    """
-    df = run_async_query(query)
+#     cached_count = df["was_cached"].value_counts().reset_index()
+#     cached_count.columns = ["was_cached", "count"]
+#     fig = px.bar(cached_count, x="was_cached", y="count", title="Query Count by 'was_cached'")
+#     st.plotly_chart(fig)
 
-    # Ensure necessary columns exist
-    if {"arrival_timestamp", "compile_duration_ms", "execution_duration_ms"}.issubset(df.columns):
-        # Convert timestamp to datetime
-        df["arrival_timestamp"] = pd.to_datetime(df["arrival_timestamp"])
+# # -------------------------------------------
+# # 🔹 PAGE 2: Top 20 Most Used Tables
+# # -------------------------------------------
+# elif st.session_state.current_page == "Overview Panel":
+#     st.title("📈 Page 2: Top 20 Most Used Tables")
+#     df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
 
-        # Group by hour and compute average durations
-        df["hour"] = df["arrival_timestamp"].dt.floor("H")  # Rounds to nearest hour
-        hourly_avg = df.groupby("hour").agg({
-            "compile_duration_ms": "mean",
-            "execution_duration_ms": "mean"
-        }).reset_index()
+#     fig, ax = plt.subplots()
+#     ax.bar(["Table1", "Table2"], [10, 20])  # Example data
+#     st.pyplot(fig)
 
-        # Create a line chart
-        fig = px.line(
-            hourly_avg, 
-            x="hour", 
-            y=["compile_duration_ms", "execution_duration_ms"], 
-            labels={"value": "Average Duration (ms)", "hour": "Time (Hourly)"},
-            title="Average Query Compilation vs Execution Time Per Hour"
-        )
+#     st.title("📊 Top K Tables")
 
-        st.plotly_chart(fig)
+#     # Date range selector
+#     start_date = st.date_input("Start Date")
+#     end_date = st.date_input("End Date")
 
-    else:
-        st.warning("Required columns not found in the dataset. Please check the data schema.")
+#     if start_date and end_date:
+#         start_date_str = start_date.strftime('%Y-%m-%d')
+#         end_date_str = end_date.strftime('%Y-%m-%d')
+#         query = f"""
+#         SELECT * FROM public.top_k_tables_per_day 
+#         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}';
+#         """
+#     else:
+#         query = "SELECT * FROM public.top_k_tables_per_day"
 
-#     import streamlit as st
-# import plotly.express as px
-# import pandas as pd
+#     # Fetch Data
+#     df = run_async_query(query)
 
-# if st.session_state.current_page == "Live Insights Panel":
-    st.title("📊 Page 2: Cached vs Non-Cached Query Execution Time")
+#     if not df.empty:
+#         # Let the user select how many top tables to display
+#         top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
 
-    # Fetch only necessary columns
-    query = """
-        SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
-        FROM redset_main
-        WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
-        GROUP BY query_type, was_cached
-        ORDER BY avg_execution_time_ms ASC
-    """
-    df = run_async_query(query)
+#         df_grouped = df.groupby('table_id')[['count', 'percentage']].sum().reset_index()
+#         df_grouped = df_grouped.sort_values(by='count', ascending=False)
 
-    # Ensure necessary columns exist
-    if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
-        # Convert was_cached to string for better labels
-        df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
+#         # Calculate overall percentage for the date range
+#         total_count = df_grouped['count'].sum()
+#         df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
 
-        # Create bar chart
-        fig = px.bar(
-            df, 
-            x="query_type", 
-            y="avg_execution_time_ms", 
-            color="was_cached",  # Color by cached vs non-cached
-            barmode="group",  # Group bars side-by-side
-            log_y=True,
-            labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
-            title="Execution Time Comparison: Cached vs Non-Cached Queries"
-        )
+#         # Limit to top_k tables
+#         df_grouped = df_grouped.head(top_k)
 
-        st.plotly_chart(fig)
+#         plt.figure(figsize=(10, 6))
+#         bars = plt.bar(df_grouped['table_id'], df_grouped['count'])
+#         plt.xlabel('Table ID')
+#         plt.ylabel('Query Count')
+#         plt.title('Top K Tables')
+#         plt.xticks(rotation=90)
 
-    else:
-        st.warning("Required columns not found in the dataset. Please check the data schema.")
-    st.title("📊 Page 2: Join vs Scan Efficiency")
+#         # Display percentage on top of bars diagonally
+#         for bar, percentage in zip(bars, df_grouped['overall_percentage']):
+#             plt.text(
+#                 bar.get_x() + bar.get_width() / 2,
+#                 bar.get_height(),
+#                 f'{percentage:.2f}%',
+#                 ha='center',
+#                 va='bottom',
+#                 rotation=45
+#             )
 
-    # Fetch only necessary columns
-    query = """
-        SELECT query_type, 
-               AVG(num_joins) AS avg_joins, 
-               AVG(num_scans) AS avg_scans 
-        FROM redset_main
-        WHERE query_type IS NOT NULL
-        GROUP BY query_type
-        ORDER BY avg_scans DESC, avg_joins DESC
-    """
-    df = run_async_query(query)
+#         st.pyplot(plt)
 
-    # Ensure necessary columns exist
-    if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
-        # Melt dataframe for better visualization
-        df_melted = df.melt(
-            id_vars=["query_type"], 
-            value_vars=["avg_joins", "avg_scans"], 
-            var_name="Metric", 
-            value_name="Average Count"
-        )
+#     else:
+#         st.write("⚠️ No data available for the selected date range.")
 
-        # Create a grouped bar chart
-        fig = px.bar(
-            df_melted, 
-            x="query_type", 
-            y="Average Count", 
-            color="Metric",  # Color by joins vs scans
-            barmode="group",  # Group bars side-by-side
-            labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
-            title="Join vs Scan Efficiency by Query Type"
-        )
+#     # -------------------------------------------
+#     # 🔹 Compile Time vs Number of Joins (With Log Transformation)
+#     # -------------------------------------------
+#     st.title("⏳ Compile Time vs Number of Joins (Log-Transformed)")
 
-        st.plotly_chart(fig)
+#     # Fetch data for the visualization
+#     query_compile_time_vs_joins = """
+#         SELECT x, y
+#         FROM public.compile_time_vs_num_joins;
+#     """
+#     df_compile_time_vs_joins = run_async_query(query_compile_time_vs_joins)
 
-    else:
-        st.warning("Required columns not found in the dataset. Please check the data schema.")
+#     if not df_compile_time_vs_joins.empty:
+#         x = df_compile_time_vs_joins["x"].values
+#         y = df_compile_time_vs_joins["y"].values
+
+#         # Apply log transformation to y
+#         y_log = log_transform(y)
+
+#         # Fit models on transformed data
+#         try:
+#             popt_linear, _ = curve_fit(linear, x, y_log)
+#             y_pred_linear = inverse_log_transform(linear(x, *popt_linear))
+#             r2_linear = r2_score(y, y_pred_linear)
+#         except:
+#             r2_linear = -np.inf
+
+#         try:
+#             popt_quadratic, _ = curve_fit(quadratic, x, y_log)
+#             y_pred_quadratic = inverse_log_transform(quadratic(x, *popt_quadratic))
+#             r2_quadratic = r2_score(y, y_pred_quadratic)
+#         except:
+#             r2_quadratic = -np.inf
+
+#         try:
+#             popt_exponential, _ = curve_fit(exponential, x, y_log, maxfev=10000)
+#             y_pred_exponential = inverse_log_transform(exponential(x, *popt_exponential))
+#             r2_exponential = r2_score(y, y_pred_exponential)
+#         except:
+#             r2_exponential = -np.inf
+
+#         # Select the best-fitting model
+#         best_fit = max(
+#             [("Linear", r2_linear, y_pred_linear if r2_linear != -np.inf else None), 
+#             ("Quadratic", r2_quadratic, y_pred_quadratic if r2_quadratic != -np.inf else None), 
+#             ("Exponential", r2_exponential, y_pred_exponential if r2_exponential != -np.inf else None)], 
+#             key=lambda x: x[1]
+#         )
+        
+#         best_model, best_r2, best_y_pred = best_fit
+
+#         # Plot
+#         fig, ax = plt.subplots(figsize=(8, 5))
+#         ax.scatter(x, y, label="Data Points", color="blue", alpha=0.6)
+
+#         if best_y_pred is not None:
+#             ax.plot(x, best_y_pred, label=f"Best Fit: {best_model} (R²={best_r2:.3f})", color="red", linewidth=2)
+
+#         ax.set_xlabel("Number of Joins")
+#         ax.set_ylabel("Compile Duration (ms) (Log-Transformed)")
+#         ax.set_title("Compile Time vs Number of Joins (Log-Transformed)")
+#         ax.legend()
+        
+#         st.pyplot(fig)
+
+#         st.write(f"📈 Best Fit Model: **{best_model}** with R² = **{best_r2:.3f}**")
+        
+#     else:
+#         st.write("⚠️ No data available for Compile Time vs Number of Joins.")
+
+# # if st.session_state.current_page == "Live Insights Panel":
+#     st.title("📊 Page 2: Query Compilation vs Execution Time (Hourly Aggregation)")
+
+#     # Fetch only necessary columns
+#     query = """
+#         SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
+#         FROM redset_main 
+#         WHERE arrival_timestamp IS NOT NULL
+#     """
+#     df = run_async_query(query)
+
+#     # Ensure necessary columns exist
+#     if {"arrival_timestamp", "compile_duration_ms", "execution_duration_ms"}.issubset(df.columns):
+#         # Convert timestamp to datetime
+#         df["arrival_timestamp"] = pd.to_datetime(df["arrival_timestamp"])
+
+#         # Group by hour and compute average durations
+#         df["hour"] = df["arrival_timestamp"].dt.floor("H")  # Rounds to nearest hour
+#         hourly_avg = df.groupby("hour").agg({
+#             "compile_duration_ms": "mean",
+#             "execution_duration_ms": "mean"
+#         }).reset_index()
+
+#         # Create a line chart
+#         fig = px.line(
+#             hourly_avg, 
+#             x="hour", 
+#             y=["compile_duration_ms", "execution_duration_ms"], 
+#             labels={"value": "Average Duration (ms)", "hour": "Time (Hourly)"},
+#             title="Average Query Compilation vs Execution Time Per Hour"
+#         )
+
+#         st.plotly_chart(fig)
+
+#     else:
+#         st.warning("Required columns not found in the dataset. Please check the data schema.")
+
+# #     import streamlit as st
+# # import plotly.express as px
+# # import pandas as pd
+
+# # if st.session_state.current_page == "Live Insights Panel":
+#     st.title("📊 Page 2: Cached vs Non-Cached Query Execution Time")
+
+#     # Fetch only necessary columns
+#     query = """
+#         SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
+#         FROM redset_main
+#         WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
+#         GROUP BY query_type, was_cached
+#         ORDER BY avg_execution_time_ms ASC
+#     """
+#     df = run_async_query(query)
+
+#     # Ensure necessary columns exist
+#     if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
+#         # Convert was_cached to string for better labels
+#         df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
+
+#         # Create bar chart
+#         fig = px.bar(
+#             df, 
+#             x="query_type", 
+#             y="avg_execution_time_ms", 
+#             color="was_cached",  # Color by cached vs non-cached
+#             barmode="group",  # Group bars side-by-side
+#             log_y=True,
+#             labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
+#             title="Execution Time Comparison: Cached vs Non-Cached Queries"
+#         )
+
+#         st.plotly_chart(fig)
+
+#     else:
+#         st.warning("Required columns not found in the dataset. Please check the data schema.")
+#     st.title("📊 Page 2: Join vs Scan Efficiency")
+
+#     # Fetch only necessary columns
+#     query = """
+#         SELECT query_type, 
+#                AVG(num_joins) AS avg_joins, 
+#                AVG(num_scans) AS avg_scans 
+#         FROM redset_main
+#         WHERE query_type IS NOT NULL
+#         GROUP BY query_type
+#         ORDER BY avg_scans DESC, avg_joins DESC
+#     """
+#     df = run_async_query(query)
+
+#     # Ensure necessary columns exist
+#     if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
+#         # Melt dataframe for better visualization
+#         df_melted = df.melt(
+#             id_vars=["query_type"], 
+#             value_vars=["avg_joins", "avg_scans"], 
+#             var_name="Metric", 
+#             value_name="Average Count"
+#         )
+
+#         # Create a grouped bar chart
+#         fig = px.bar(
+#             df_melted, 
+#             x="query_type", 
+#             y="Average Count", 
+#             color="Metric",  # Color by joins vs scans
+#             barmode="group",  # Group bars side-by-side
+#             labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
+#             title="Join vs Scan Efficiency by Query Type"
+#         )
+
+#         st.plotly_chart(fig)
+
+#     else:
+#         st.warning("Required columns not found in the dataset. Please check the data schema.")
