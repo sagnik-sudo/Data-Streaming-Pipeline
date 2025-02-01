@@ -10,19 +10,16 @@ DB_CONFIG = {
 }
 
 CREATE_MATERIALIZED_VIEW_QUERY = """
-CREATE MATERIALIZED VIEW compile_time_vs_num_joins AS
-SELECT
-    user_id,
-    arrival_timestamp
+DROP MATERIALIZED VIEW compile_time_vs_num_joins CASCADE;
+CREATE MATERIALIZED VIEW public.compile_time_vs_num_joins AS
+SELECT 
     num_joins AS x,
-    compile_duration_ms AS y
-    
-FROM
-    public.redset_main
-WHERE
-    query_type = 'select'
-    AND num_joins IS NOT NULL
-    AND compile_duration_ms IS NOT NULL;
+    AVG(compile_duration_ms) AS y
+FROM public.redset_main
+WHERE query_type = 'select' 
+AND num_joins IS NOT NULL
+GROUP BY num_joins
+ORDER BY num_joins;
 """
 
 async def create_materialized_view():

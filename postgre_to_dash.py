@@ -334,11 +334,8 @@ elif st.session_state.current_page == "Overview Panel":
 
     # Fetch data for the visualization
     query_compile_time_vs_joins = """
-        SELECT num_joins AS x, compile_duration_ms AS y 
-        FROM public.redset_main 
-        WHERE query_type = 'select' 
-        AND num_joins IS NOT NULL 
-        AND compile_duration_ms IS NOT NULL;
+        SELECT x, y
+        FROM public.compile_time_vs_num_joins;
     """
     df_compile_time_vs_joins = run_async_query(query_compile_time_vs_joins)
 
@@ -399,3 +396,118 @@ elif st.session_state.current_page == "Overview Panel":
         
     else:
         st.write("⚠️ No data available for Compile Time vs Number of Joins.")
+
+# if st.session_state.current_page == "Live Insights Panel":
+    st.title("📊 Page 2: Query Compilation vs Execution Time (Hourly Aggregation)")
+
+    # Fetch only necessary columns
+    query = """
+        SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
+        FROM redset_main 
+        WHERE arrival_timestamp IS NOT NULL
+    """
+    df = run_async_query(query)
+
+    # Ensure necessary columns exist
+    if {"arrival_timestamp", "compile_duration_ms", "execution_duration_ms"}.issubset(df.columns):
+        # Convert timestamp to datetime
+        df["arrival_timestamp"] = pd.to_datetime(df["arrival_timestamp"])
+
+        # Group by hour and compute average durations
+        df["hour"] = df["arrival_timestamp"].dt.floor("H")  # Rounds to nearest hour
+        hourly_avg = df.groupby("hour").agg({
+            "compile_duration_ms": "mean",
+            "execution_duration_ms": "mean"
+        }).reset_index()
+
+        # Create a line chart
+        fig = px.line(
+            hourly_avg, 
+            x="hour", 
+            y=["compile_duration_ms", "execution_duration_ms"], 
+            labels={"value": "Average Duration (ms)", "hour": "Time (Hourly)"},
+            title="Average Query Compilation vs Execution Time Per Hour"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Required columns not found in the dataset. Please check the data schema.")
+
+#     import streamlit as st
+# import plotly.express as px
+# import pandas as pd
+
+# if st.session_state.current_page == "Live Insights Panel":
+    st.title("📊 Page 2: Cached vs Non-Cached Query Execution Time")
+
+    # Fetch only necessary columns
+    query = """
+        SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
+        FROM redset_main
+        WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
+        GROUP BY query_type, was_cached
+        ORDER BY avg_execution_time_ms ASC
+    """
+    df = run_async_query(query)
+
+    # Ensure necessary columns exist
+    if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
+        # Convert was_cached to string for better labels
+        df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
+
+        # Create bar chart
+        fig = px.bar(
+            df, 
+            x="query_type", 
+            y="avg_execution_time_ms", 
+            color="was_cached",  # Color by cached vs non-cached
+            barmode="group",  # Group bars side-by-side
+            log_y=True,
+            labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
+            title="Execution Time Comparison: Cached vs Non-Cached Queries"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Required columns not found in the dataset. Please check the data schema.")
+    st.title("📊 Page 2: Join vs Scan Efficiency")
+
+    # Fetch only necessary columns
+    query = """
+        SELECT query_type, 
+               AVG(num_joins) AS avg_joins, 
+               AVG(num_scans) AS avg_scans 
+        FROM redset_main
+        WHERE query_type IS NOT NULL
+        GROUP BY query_type
+        ORDER BY avg_scans DESC, avg_joins DESC
+    """
+    df = run_async_query(query)
+
+    # Ensure necessary columns exist
+    if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
+        # Melt dataframe for better visualization
+        df_melted = df.melt(
+            id_vars=["query_type"], 
+            value_vars=["avg_joins", "avg_scans"], 
+            var_name="Metric", 
+            value_name="Average Count"
+        )
+
+        # Create a grouped bar chart
+        fig = px.bar(
+            df_melted, 
+            x="query_type", 
+            y="Average Count", 
+            color="Metric",  # Color by joins vs scans
+            barmode="group",  # Group bars side-by-side
+            labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
+            title="Join vs Scan Efficiency by Query Type"
+        )
+
+        st.plotly_chart(fig)
+
+    else:
+        st.warning("Required columns not found in the dataset. Please check the data schema.")
