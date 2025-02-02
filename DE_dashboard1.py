@@ -20,7 +20,7 @@ user_id = st.sidebar.text_input("Enter User ID (Optional)")
 # Function to load data from Parquet file
 @st.cache_data
 def load_data():
-    return pd.read_parquet("cleaned_data.parquet").sample(10000, random_state=42)
+    return pd.read_parquet("full_sl.parquet").sample(10000, random_state=42)
 
 df = load_data()
 
@@ -79,8 +79,5 @@ elif page == "Cache Hit Rate":
 elif page == "Compile Time vs Joins":
     st.markdown("## ⏳ Compile Time vs Number of Joins")
     st.write("(Graph will be implemented here)")
-
-st.markdown("---")
-st.write("Dashboard Developed with ❤️ using Streamlit")
 
 
