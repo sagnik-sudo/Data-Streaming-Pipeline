@@ -281,14 +281,6 @@ query_type = st.sidebar.selectbox("Select Query Type (Optional)", query_type_opt
 # Treat the default "(Select Query Type)" as None
 query_type = None if query_type == "(Select Query Type)" else query_type
 
-# Function to load data from Parquet file
-@st.cache_data
-def load_data():
-    return pd.read_parquet("full_sl.parquet").sample(10000, random_state=42)
-
-df = load_data()
-
-
 # Dynamic Content Based on Selected Page
 if page == "Home":
     # KPI Metrics Section
@@ -313,18 +305,18 @@ if page == "Home":
 
     # Display in Streamlit
     col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
+
 elif page == "Trends":
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
-        st.title("📊 Was Cached Distribution")
+        st.markdown("<h4>📊 Was Cached Distribution</h4>", unsafe_allow_html=True)
         df = run_async_query("SELECT * FROM redset_main")
         cached_count = df["was_cached"].value_counts().reset_index()
         cached_count.columns = ["was_cached", "count"]
         fig = px.bar(cached_count, x="was_cached", y="count", title="Query Count by 'was_cached'")
         st.plotly_chart(fig)
     with col2:
-        st.title("📊 Query Compilation vs Execution Time (Hourly Aggregation)")
-
+        st.markdown("<h4>📊 Query Compilation vs Execution Time", unsafe_allow_html=True)
         # Fetch only necessary columns
         query = """
             SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
@@ -358,79 +350,81 @@ elif page == "Trends":
 
         else:
             st.warning("Required columns not found in the dataset. Please check the data schema.")
+    col3, col4 = st.columns(2)
+    with col3:
+        st.markdown("<h4>📊 Cached vs Non-Cached Query Execution Time</h4>", unsafe_allow_html=True)
 
-    st.title("📊 Cached vs Non-Cached Query Execution Time")
+        # Fetch only necessary columns
+        query = """
+            SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
+            FROM redset_main
+            WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
+            GROUP BY query_type, was_cached
+            ORDER BY avg_execution_time_ms ASC
+        """
+        df = run_async_query(query)
 
-    # Fetch only necessary columns
-    query = """
-        SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
-        FROM redset_main
-        WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
-        GROUP BY query_type, was_cached
-        ORDER BY avg_execution_time_ms ASC
-    """
-    df = run_async_query(query)
+        # Ensure necessary columns exist
+        if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
+            # Convert was_cached to string for better labels
+            df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
 
-    # Ensure necessary columns exist
-    if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
-        # Convert was_cached to string for better labels
-        df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
+            # Create bar chart
+            fig = px.bar(
+                df, 
+                x="query_type", 
+                y="avg_execution_time_ms", 
+                color="was_cached",  # Color by cached vs non-cached
+                barmode="group",  # Group bars side-by-side
+                log_y=True,
+                labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
+                title="Execution Time Comparison: Cached vs Non-Cached Queries"
+            )
 
-        # Create bar chart
-        fig = px.bar(
-            df, 
-            x="query_type", 
-            y="avg_execution_time_ms", 
-            color="was_cached",  # Color by cached vs non-cached
-            barmode="group",  # Group bars side-by-side
-            log_y=True,
-            labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
-            title="Execution Time Comparison: Cached vs Non-Cached Queries"
-        )
+            st.plotly_chart(fig)
 
-        st.plotly_chart(fig)
+        else:
+            st.warning("Required columns not found in the dataset. Please check the data schema.")
+    with col4:
+        st.markdown("<h4>📊 Join vs Scan Efficiency</h4>", unsafe_allow_html=True)
 
-    else:
-        st.warning("Required columns not found in the dataset. Please check the data schema.")
-    st.title("📊 Join vs Scan Efficiency")
+        # Fetch only necessary columns
+        query = """
+            SELECT query_type, 
+                AVG(num_joins) AS avg_joins, 
+                AVG(num_scans) AS avg_scans 
+            FROM redset_main
+            WHERE query_type IS NOT NULL
+            GROUP BY query_type
+            ORDER BY avg_scans DESC, avg_joins DESC
+        """
+        df = run_async_query(query)
 
-    # Fetch only necessary columns
-    query = """
-        SELECT query_type, 
-               AVG(num_joins) AS avg_joins, 
-               AVG(num_scans) AS avg_scans 
-        FROM redset_main
-        WHERE query_type IS NOT NULL
-        GROUP BY query_type
-        ORDER BY avg_scans DESC, avg_joins DESC
-    """
-    df = run_async_query(query)
+        # Ensure necessary columns exist
+        if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
+            # Melt dataframe for better visualization
+            df_melted = df.melt(
+                id_vars=["query_type"], 
+                value_vars=["avg_joins", "avg_scans"], 
+                var_name="Metric", 
+                value_name="Average Count"
+            )
 
-    # Ensure necessary columns exist
-    if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
-        # Melt dataframe for better visualization
-        df_melted = df.melt(
-            id_vars=["query_type"], 
-            value_vars=["avg_joins", "avg_scans"], 
-            var_name="Metric", 
-            value_name="Average Count"
-        )
+            # Create a grouped bar chart
+            fig = px.bar(
+                df_melted, 
+                x="query_type", 
+                y="Average Count", 
+                color="Metric",  # Color by joins vs scans
+                barmode="group",  # Group bars side-by-side
+                labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
+                title="Join vs Scan Efficiency by Query Type"
+            )
 
-        # Create a grouped bar chart
-        fig = px.bar(
-            df_melted, 
-            x="query_type", 
-            y="Average Count", 
-            color="Metric",  # Color by joins vs scans
-            barmode="group",  # Group bars side-by-side
-            labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
-            title="Join vs Scan Efficiency by Query Type"
-        )
+            st.plotly_chart(fig)
 
-        st.plotly_chart(fig)
-
-    else:
-        st.warning("Required columns not found in the dataset. Please check the data schema.")
+        else:
+            st.warning("Required columns not found in the dataset. Please check the data schema.")
 
 elif page == "Live Query Stream":
     pass
