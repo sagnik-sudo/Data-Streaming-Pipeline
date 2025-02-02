@@ -12,6 +12,7 @@ from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import numpy as np
 from datetime import date, timedelta
+import time
 
 
 # Set Page Layout & Dark Theme
@@ -169,6 +170,13 @@ def inverse_log_transform(y_log):
     return np.expm1(y_log)  # exp(y) - 1
 
 # Database Configuration
+# DB_CONFIG = {
+#     'user': 'sagnik',
+#     'password': 'sagnik',
+#     'host': '192.168.127.138',
+#     'port': '5432',
+#     'database': 'de_project_main'
+# }
 DB_CONFIG = {
     'user': 'postgres',
     'password': 'postgres',
@@ -427,7 +435,187 @@ elif page == "Trends":
             st.warning("Required columns not found in the dataset. Please check the data schema.")
 
 elif page == "Live Query Stream":
-    pass
+    # st.title("📊 Live Query Stream")
+
+    # if start_date and end_date:
+    #     start_date_str = start_date.strftime('%Y-%m-%d')
+    #     end_date_str = end_date.strftime('%Y-%m-%d')
+
+    #     query = f"""
+    #     SELECT 
+    #         date_trunc('day', rm.arrival_timestamp) AS day,
+    #         table_id,
+    #         rm.query_type,
+    #         rm.user_id,
+    #         COUNT(*) AS count,
+    #         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', rm.arrival_timestamp)) AS percentage,
+    #         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS overall_percentage
+    #     FROM (
+    #         SELECT 
+    #             arrival_timestamp, 
+    #             unnest(string_to_array(read_table_ids, ',')) AS table_id,
+    #             query_type,
+    #             user_id
+    #         FROM redset_main
+    #         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
+    #         UNION ALL
+    #         SELECT 
+    #             arrival_timestamp, 
+    #             unnest(string_to_array(write_table_ids, ',')) AS table_id,
+    #             query_type,
+    #             user_id
+    #         FROM redset_main
+    #         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
+    #     ) AS rm
+    #     GROUP BY day, table_id, rm.query_type, rm.user_id
+    #     ORDER BY count DESC
+    #     LIMIT 50;
+    #     """
+    # else:
+    #     query = "SELECT * FROM public.top_k_tables_per_day LIMIT 50"
+
+    # # **Live Data Streaming Section**
+    # placeholder = st.empty()  # Placeholder for real-time updates
+
+    # # Refresh Rate Selection
+    # refresh_rate = st.slider("Refresh Interval (seconds)", 1, 30, 10)
+    # top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
+    # while True:
+    #     df = run_async_query(query)
+
+    #     if not df.empty:
+    #         df_grouped = df.groupby('table_id')[['count', 'percentage']].sum().reset_index()
+    #         df_grouped = df_grouped.sort_values(by='count', ascending=False)
+
+    #         # Calculate overall percentage for the date range
+    #         total_count = df_grouped['count'].sum()
+    #         df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
+
+    #         # Limit to top_k tables
+    #         df_grouped = df_grouped.head(top_k)
+
+    #         # Plot Data
+    #         fig, ax = plt.subplots(figsize=(10, 6))
+    #         bars = ax.bar(df_grouped['table_id'], df_grouped['count'])
+
+    #         ax.set_xlabel('Table ID')
+    #         ax.set_ylabel('Query Count')
+    #         ax.set_title('Top K Tables')
+    #         ax.set_xticklabels(df_grouped['table_id'], rotation=90)
+
+    #         # Display percentage on top of bars diagonally
+    #         for bar, percentage in zip(bars, df_grouped['overall_percentage']):
+    #             ax.text(
+    #                 bar.get_x() + bar.get_width() / 2,
+    #                 bar.get_height(),
+    #                 f'{percentage:.2f}%',
+    #                 ha='center',
+    #                 va='bottom',
+    #                 rotation=45
+    #             )
+
+    #         # Update the Streamlit UI dynamically
+    #         with placeholder:
+    #             st.pyplot(fig)
+    #             st.write(f"🔄 Last updated: {time.strftime('%H:%M:%S')}")
+
+    #     else:
+    #         with placeholder:
+    #             st.warning("⚠️ No data available for the selected date range.")
+
+    #     time.sleep(refresh_rate)  # Wait for the specified refresh interval
+    graph2_placeholder = st.empty()
+    graph3_placeholder = st.empty()
+
+    # Refresh Rate Selector
+    refresh_rate = st.slider("Refresh Interval (seconds)", 1, 30, 5)
+    while True:
+        query_compile_time_vs_joins = f"""
+        SELECT num_joins AS x, AVG(compile_duration_ms) AS y
+        FROM public.redset_main
+        WHERE query_type = 'select' 
+        AND num_joins IS NOT NULL
+        AND arrival_timestamp BETWEEN '{start_date}' AND '{end_date}'
+        GROUP BY num_joins
+        ORDER BY num_joins;
+        """
+
+        # Fetch Data
+        
+        df = run_async_query(query_compile_time_vs_joins)
+
+        if not df.empty:
+            # Convert to numerical values for plotting
+            df["x"] = pd.to_numeric(df["x"])
+            df["y"] = pd.to_numeric(df["y"])
+
+            # Plot Data
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.scatter(df["x"], df["y"], color="blue", alpha=0.6, label="Data Points")
+
+            ax.set_xlabel("Number of Joins")
+            ax.set_ylabel("Compile Duration (ms)")
+            ax.set_title("Compile Time vs Number of Joins")
+            ax.grid(True)
+            ax.legend()
+
+            # Display plot in Streamlit
+            graph2_placeholder.pyplot(fig)
+            # plt.close(fig)
+            # st.pyplot(fig)
+        else:
+            st.warning("⚠️ No data available for Compile Time vs Number of Joins.")
+        if start_date and end_date:
+            start_date_str = start_date.strftime('%Y-%m-%d')
+            end_date_str = end_date.strftime('%Y-%m-%d')
+            
+            query = f"""
+                SELECT 
+                    date_trunc('day', arrival_timestamp) AS day,
+                    SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)) * 100.0 
+                    / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)), 0) AS total_hit_rate_per_day
+                FROM redset_main
+                WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
+                GROUP BY day
+                ORDER BY day;
+            """
+        else:
+            query = """
+                SELECT 
+                    date_trunc('day', arrival_timestamp) AS day,
+                    SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)) * 100.0 
+                    / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)), 0) AS total_hit_rate_per_day
+                FROM redset_main
+                GROUP BY day
+                ORDER BY day;
+            """
+
+        # Fetch Data
+        df = run_async_query(query)
+
+        if not df.empty:
+            # Convert "day" to string (for cleaner x-axis labels)
+            df["day"] = df["day"].astype(str)
+
+            # Plot Data
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(df["day"], df["total_hit_rate_per_day"], marker="o", linestyle="-", color="blue", label="Cache Hit Rate")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Cache Hit Rate (%)")
+            ax.set_title("Cache Hit Rate Over Time")
+            ax.grid(True)
+
+            # Set only dates (remove time component)
+            ax.set_xticks(df["day"])  # Set the ticks to be the date values
+            ax.set_xticklabels(df["day"], rotation=45)  # Rotate for better readability
+            
+            ax.legend()
+
+            # Display plot in Streamlit
+            graph2_placeholder.pyplot(fig)
+            plt.close(fig)
+        else:
+            st.warning("⚠️ No data available for the selected date range.")
 
 elif page == "Top-K Tables":
     st.title("📊 Top K Tables")
@@ -484,8 +672,49 @@ elif page == "Top-K Tables":
 
 
 elif page == "Cache Hit Rate":
-    st.markdown("## ⚡ Cache Hit Rate Over Time")
-    st.write("(Graph will be implemented here)")
+    st.markdown("## ⚡ Cache Hit Rate Over Time Range")
+    if start_date and end_date:
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        query = f"""
+            SELECT day::date AS day, SUM(hit_rate_per_day) AS cache_hit_rate
+            FROM public.hit_rate_per_day
+            WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}'
+            GROUP BY day
+            ORDER BY day ASC;
+        """
+    else:
+        query = """
+            SELECT day::date AS day, SUM(hit_rate_per_day) AS cache_hit_rate
+            FROM public.hit_rate_per_day
+            GROUP BY day
+            ORDER BY day ASC;
+        """
+
+    # Fetch Data
+    df = run_async_query(query)
+
+    if not df.empty:
+        # Convert "day" to string (for cleaner x-axis labels)
+        df["day"] = df["day"].astype(str)
+
+        # Plot Data
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(df["day"], df["cache_hit_rate"], marker="o", linestyle="-", color="blue")
+
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Cache Hit Rate (%)")
+        # ax.set_title("Cache Hit Rate Over Time")
+        ax.grid(True)
+
+        # Set only dates (remove time component)
+        ax.set_xticks(df["day"])  # Set the ticks to be the date values
+        ax.set_xticklabels(df["day"], rotation=45)  # Rotate for better readability
+        
+        # Display plot in Streamlit
+        st.pyplot(fig)
+    else:
+        st.warning("⚠️ No data available for the selected date range.")
 
 elif page == "Compile Time vs Joins":
     # -------------------------------------------
@@ -566,283 +795,3 @@ if st.sidebar.button("Logout"):
     st.session_state.logged_in = False
     st.session_state.username = ""
     st.rerun()
-
-
-
-
-
-# # -------------------------------------------
-# # 🔹 PAGE NAVIGATION
-# # -------------------------------------------
-# st.sidebar.title("📂 Navigation")
-# if st.sidebar.button("Live Insights Panel"):
-#     st.session_state.current_page = "Live Insights Panel"
-#     st.rerun()
-
-# if st.sidebar.button("Overview Panel"):
-#     st.session_state.current_page = "Overview Panel"
-#     st.rerun()
-
-# # -------------------------------------------
-# # 🔹 PAGE 1: Was Cached Distribution
-# # -------------------------------------------
-# if st.session_state.current_page == "Live Insights Panel":
-#     st.title("📊 Page 1: Was Cached Distribution")
-#     df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
-
-#     cached_count = df["was_cached"].value_counts().reset_index()
-#     cached_count.columns = ["was_cached", "count"]
-#     fig = px.bar(cached_count, x="was_cached", y="count", title="Query Count by 'was_cached'")
-#     st.plotly_chart(fig)
-
-# # -------------------------------------------
-# # 🔹 PAGE 2: Top 20 Most Used Tables
-# # -------------------------------------------
-# elif st.session_state.current_page == "Overview Panel":
-#     st.title("📈 Page 2: Top 20 Most Used Tables")
-#     df = run_async_query("SELECT * FROM redset_main LIMIT 1000")
-
-#     fig, ax = plt.subplots()
-#     ax.bar(["Table1", "Table2"], [10, 20])  # Example data
-#     st.pyplot(fig)
-
-#     st.title("📊 Top K Tables")
-
-#     # Date range selector
-#     start_date = st.date_input("Start Date")
-#     end_date = st.date_input("End Date")
-
-#     if start_date and end_date:
-#         start_date_str = start_date.strftime('%Y-%m-%d')
-#         end_date_str = end_date.strftime('%Y-%m-%d')
-#         query = f"""
-#         SELECT * FROM public.top_k_tables_per_day 
-#         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}';
-#         """
-#     else:
-#         query = "SELECT * FROM public.top_k_tables_per_day"
-
-#     # Fetch Data
-#     df = run_async_query(query)
-
-#     if not df.empty:
-#         # Let the user select how many top tables to display
-#         top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
-
-#         df_grouped = df.groupby('table_id')[['count', 'percentage']].sum().reset_index()
-#         df_grouped = df_grouped.sort_values(by='count', ascending=False)
-
-#         # Calculate overall percentage for the date range
-#         total_count = df_grouped['count'].sum()
-#         df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
-
-#         # Limit to top_k tables
-#         df_grouped = df_grouped.head(top_k)
-
-#         plt.figure(figsize=(10, 6))
-#         bars = plt.bar(df_grouped['table_id'], df_grouped['count'])
-#         plt.xlabel('Table ID')
-#         plt.ylabel('Query Count')
-#         plt.title('Top K Tables')
-#         plt.xticks(rotation=90)
-
-#         # Display percentage on top of bars diagonally
-#         for bar, percentage in zip(bars, df_grouped['overall_percentage']):
-#             plt.text(
-#                 bar.get_x() + bar.get_width() / 2,
-#                 bar.get_height(),
-#                 f'{percentage:.2f}%',
-#                 ha='center',
-#                 va='bottom',
-#                 rotation=45
-#             )
-
-#         st.pyplot(plt)
-
-#     else:
-#         st.write("⚠️ No data available for the selected date range.")
-
-#     # -------------------------------------------
-#     # 🔹 Compile Time vs Number of Joins (With Log Transformation)
-#     # -------------------------------------------
-#     st.title("⏳ Compile Time vs Number of Joins (Log-Transformed)")
-
-#     # Fetch data for the visualization
-#     query_compile_time_vs_joins = """
-#         SELECT x, y
-#         FROM public.compile_time_vs_num_joins;
-#     """
-#     df_compile_time_vs_joins = run_async_query(query_compile_time_vs_joins)
-
-#     if not df_compile_time_vs_joins.empty:
-#         x = df_compile_time_vs_joins["x"].values
-#         y = df_compile_time_vs_joins["y"].values
-
-#         # Apply log transformation to y
-#         y_log = log_transform(y)
-
-#         # Fit models on transformed data
-#         try:
-#             popt_linear, _ = curve_fit(linear, x, y_log)
-#             y_pred_linear = inverse_log_transform(linear(x, *popt_linear))
-#             r2_linear = r2_score(y, y_pred_linear)
-#         except:
-#             r2_linear = -np.inf
-
-#         try:
-#             popt_quadratic, _ = curve_fit(quadratic, x, y_log)
-#             y_pred_quadratic = inverse_log_transform(quadratic(x, *popt_quadratic))
-#             r2_quadratic = r2_score(y, y_pred_quadratic)
-#         except:
-#             r2_quadratic = -np.inf
-
-#         try:
-#             popt_exponential, _ = curve_fit(exponential, x, y_log, maxfev=10000)
-#             y_pred_exponential = inverse_log_transform(exponential(x, *popt_exponential))
-#             r2_exponential = r2_score(y, y_pred_exponential)
-#         except:
-#             r2_exponential = -np.inf
-
-#         # Select the best-fitting model
-#         best_fit = max(
-#             [("Linear", r2_linear, y_pred_linear if r2_linear != -np.inf else None), 
-#             ("Quadratic", r2_quadratic, y_pred_quadratic if r2_quadratic != -np.inf else None), 
-#             ("Exponential", r2_exponential, y_pred_exponential if r2_exponential != -np.inf else None)], 
-#             key=lambda x: x[1]
-#         )
-        
-#         best_model, best_r2, best_y_pred = best_fit
-
-#         # Plot
-#         fig, ax = plt.subplots(figsize=(8, 5))
-#         ax.scatter(x, y, label="Data Points", color="blue", alpha=0.6)
-
-#         if best_y_pred is not None:
-#             ax.plot(x, best_y_pred, label=f"Best Fit: {best_model} (R²={best_r2:.3f})", color="red", linewidth=2)
-
-#         ax.set_xlabel("Number of Joins")
-#         ax.set_ylabel("Compile Duration (ms) (Log-Transformed)")
-#         ax.set_title("Compile Time vs Number of Joins (Log-Transformed)")
-#         ax.legend()
-        
-#         st.pyplot(fig)
-
-#         st.write(f"📈 Best Fit Model: **{best_model}** with R² = **{best_r2:.3f}**")
-        
-#     else:
-#         st.write("⚠️ No data available for Compile Time vs Number of Joins.")
-
-# # if st.session_state.current_page == "Live Insights Panel":
-#     st.title("📊 Page 2: Query Compilation vs Execution Time (Hourly Aggregation)")
-
-#     # Fetch only necessary columns
-#     query = """
-#         SELECT arrival_timestamp, compile_duration_ms, execution_duration_ms 
-#         FROM redset_main 
-#         WHERE arrival_timestamp IS NOT NULL
-#     """
-#     df = run_async_query(query)
-
-#     # Ensure necessary columns exist
-#     if {"arrival_timestamp", "compile_duration_ms", "execution_duration_ms"}.issubset(df.columns):
-#         # Convert timestamp to datetime
-#         df["arrival_timestamp"] = pd.to_datetime(df["arrival_timestamp"])
-
-#         # Group by hour and compute average durations
-#         df["hour"] = df["arrival_timestamp"].dt.floor("H")  # Rounds to nearest hour
-#         hourly_avg = df.groupby("hour").agg({
-#             "compile_duration_ms": "mean",
-#             "execution_duration_ms": "mean"
-#         }).reset_index()
-
-#         # Create a line chart
-#         fig = px.line(
-#             hourly_avg, 
-#             x="hour", 
-#             y=["compile_duration_ms", "execution_duration_ms"], 
-#             labels={"value": "Average Duration (ms)", "hour": "Time (Hourly)"},
-#             title="Average Query Compilation vs Execution Time Per Hour"
-#         )
-
-#         st.plotly_chart(fig)
-
-#     else:
-#         st.warning("Required columns not found in the dataset. Please check the data schema.")
-
-# #     import streamlit as st
-# # import plotly.express as px
-# # import pandas as pd
-
-# # if st.session_state.current_page == "Live Insights Panel":
-#     st.title("📊 Page 2: Cached vs Non-Cached Query Execution Time")
-
-#     # Fetch only necessary columns
-#     query = """
-#         SELECT query_type, was_cached, AVG(execution_duration_ms) AS avg_execution_time_ms
-#         FROM redset_main
-#         WHERE query_type IS NOT NULL AND was_cached IS NOT NULL
-#         GROUP BY query_type, was_cached
-#         ORDER BY avg_execution_time_ms ASC
-#     """
-#     df = run_async_query(query)
-
-#     # Ensure necessary columns exist
-#     if {"query_type", "was_cached", "avg_execution_time_ms"}.issubset(df.columns):
-#         # Convert was_cached to string for better labels
-#         df["was_cached"] = df["was_cached"].astype(str).replace({"0": "Not Cached", "1": "Cached"})
-
-#         # Create bar chart
-#         fig = px.bar(
-#             df, 
-#             x="query_type", 
-#             y="avg_execution_time_ms", 
-#             color="was_cached",  # Color by cached vs non-cached
-#             barmode="group",  # Group bars side-by-side
-#             log_y=True,
-#             labels={"query_type": "Query Type", "avg_execution_time_ms": "Avg Execution Time (ms)"},
-#             title="Execution Time Comparison: Cached vs Non-Cached Queries"
-#         )
-
-#         st.plotly_chart(fig)
-
-#     else:
-#         st.warning("Required columns not found in the dataset. Please check the data schema.")
-#     st.title("📊 Page 2: Join vs Scan Efficiency")
-
-#     # Fetch only necessary columns
-#     query = """
-#         SELECT query_type, 
-#                AVG(num_joins) AS avg_joins, 
-#                AVG(num_scans) AS avg_scans 
-#         FROM redset_main
-#         WHERE query_type IS NOT NULL
-#         GROUP BY query_type
-#         ORDER BY avg_scans DESC, avg_joins DESC
-#     """
-#     df = run_async_query(query)
-
-#     # Ensure necessary columns exist
-#     if {"query_type", "avg_joins", "avg_scans"}.issubset(df.columns):
-#         # Melt dataframe for better visualization
-#         df_melted = df.melt(
-#             id_vars=["query_type"], 
-#             value_vars=["avg_joins", "avg_scans"], 
-#             var_name="Metric", 
-#             value_name="Average Count"
-#         )
-
-#         # Create a grouped bar chart
-#         fig = px.bar(
-#             df_melted, 
-#             x="query_type", 
-#             y="Average Count", 
-#             color="Metric",  # Color by joins vs scans
-#             barmode="group",  # Group bars side-by-side
-#             labels={"query_type": "Query Type", "Average Count": "Avg Joins & Scans"},
-#             title="Join vs Scan Efficiency by Query Type"
-#         )
-
-#         st.plotly_chart(fig)
-
-#     else:
-#         st.warning("Required columns not found in the dataset. Please check the data schema.")

@@ -2,11 +2,11 @@ import asyncio
 import asyncpg
 
 DB_CONFIG = {
-    'user': 'postgres',
-    'password': 'postgres',
-    'host': 'localhost',
+    'user': 'sagnik',
+    'password': 'sagnik',
+    'host': '192.168.127.138',
     'port': '5432',
-    'database': 'redset'
+    'database': 'de_project_main'
 }
 
 CREATE_MATERIALIZED_VIEW_QUERY = """
