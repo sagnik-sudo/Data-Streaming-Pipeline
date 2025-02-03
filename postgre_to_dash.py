@@ -11,7 +11,7 @@ import pickle
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import numpy as np
-from datetime import date, timedelta
+from datetime import date, timedelta,datetime
 import time
 
 
@@ -411,31 +411,46 @@ if page == "Trends":
             st.warning("Required columns not found in the dataset. Please check the data schema.")
 
 elif page == "Live Query Stream":
-#########################
-# Key Metrics Start here
-#########################
+    # #########################
+    # # Key Metrics Start here
+    # #########################
 
-    st.markdown("## 🚀 Current Metrics")
-    col1, col2, col3 = st.columns(3)
-    total_queries = run_async_query("SELECT COUNT(*) FROM redset_main")
-    total_queries_count = total_queries.iloc[0, 0]
-    col1.metric("Total Queries Processed", total_queries_count)
-    # Execute SQL query
-    cache_hit_rate_query = run_async_query("SELECT (SUM(was_cached) * 100.0) / COUNT(*) AS cache_hit_rate FROM redset_main")
+    with st.container():
+        col1, col2, col3,col4 = st.columns(4)
 
-    # Extract value from the result
-    cache_hit_rate = cache_hit_rate_query.iloc[0, 0]  # Assuming it returns a DataFrame
+        # Fetch data dynamically
+        total_queries = run_async_query("SELECT COUNT(*) FROM redset_main")
+        total_queries_count = total_queries.iloc[0, 0] if not total_queries.empty else 0
 
-    # Display in Streamlit
-    col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
-    # Run SQL query to get the average compile time
-    avg_compile_time_query = run_async_query("SELECT COALESCE(compile_duration_ms, 0) AS avg_compile_time FROM redset_main")
+        cache_hit_rate_query = run_async_query(
+            "SELECT (SUM(was_cached) * 100.0) / COUNT(*) AS cache_hit_rate FROM redset_main"
+        )
+        cache_hit_rate = cache_hit_rate_query.iloc[0, 0] if not cache_hit_rate_query.empty else 0.0
 
-    # Extract value from the result
-    avg_compile_time = avg_compile_time_query.iloc[0, 0]  # Assuming it returns a DataFrame
+        avg_compile_time_query = run_async_query(
+            "SELECT AVG(compile_duration_ms) AS avg_compile_time FROM redset_main WHERE compile_duration_ms IS NOT NULL AND compile_duration_ms != 'NaN';"
+        )
+        avg_compile_time = avg_compile_time_query.iloc[0, 0] if not avg_compile_time_query.empty else 0.0
 
-    # Display in Streamlit
-    col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
+        # latest_query_date_query = run_async_query(
+        # "SELECT MAX(DATE(arrival_timestamp)) AS latest_query_date FROM redset_main;"
+        # )
+        # latest_query_date = latest_query_date_query.iloc[0, 0] if not latest_query_date_query.empty else "N/A"
+
+    
+        # if isinstance(latest_query_date, (datetime, date)):  
+        #     latest_query_date_str = latest_query_date.strftime("%Y-%m-%d")  # Convert to YYYY-MM-DD
+        # else:
+        #     latest_query_date_str = str(latest_query_date)  # Ensure it's a string
+
+        # ✅ Force conversion to string again for safety
+        # latest_query_date_str = str(latest_query_date_str)
+
+        # Display metrics inside respective columns
+        col1.metric("Total Queries Processed", total_queries_count)
+        col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
+        col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
+        # col4.metric("Latest Query Date", latest_query_date_str)
 
 
 
@@ -625,7 +640,7 @@ elif page == "Top-K Tables":
         end_date_str = end_date.strftime('%Y-%m-%d')
         query = f"""
         SELECT * FROM public.top_k_tables_per_day 
-        WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}';
+        WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}';
         """
     else:
         query = "SELECT * FROM public.top_k_tables_per_day"
