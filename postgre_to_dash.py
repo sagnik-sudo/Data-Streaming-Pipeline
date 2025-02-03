@@ -190,7 +190,7 @@ def inverse_log_transform(y_log):
 DB_CONFIG = {
     'user': 'sagnik',
     'password': 'sagnik',
-    'host': 'localhost', #192.168.127.138 - Goutham IP
+    'host': '192.168.7.138', #192.168.127.138 - Goutham IP
     'port': '5432',
     'database': 'de_project_main'
 }
@@ -565,12 +565,12 @@ elif page == "Live Query Stream":
     )
     SELECT 
         date_trunc('minute', arrival_timestamp) AS minute,  -- Change granularity to minutes
-        SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('minute', arrival_timestamp)) * 100.0 
-        / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('minute', arrival_timestamp)), 0) AS total_hit_rate_per_5_minutes
+        COUNT(*) FILTER (WHERE was_cached = 1) * 100.0 
+        / NULLIF(COUNT(*), 0) AS total_hit_rate_per_5_minutes
     FROM redset_main
     WHERE date_trunc('day', arrival_timestamp) = (SELECT day FROM last_day)
     AND EXTRACT(MINUTE FROM arrival_timestamp) % 5 = 0  -- Filter for every 5 minutes
-    GROUP BY minute
+    GROUP BY date_trunc('minute', arrival_timestamp)
     ORDER BY minute;
     """
 
@@ -578,28 +578,31 @@ elif page == "Live Query Stream":
 
     with container2:
         if not df_cache_hit.empty:
-            df_cache_hit["hour"] = pd.to_datetime(df_cache_hit["minute"]).dt.floor('H')
-
-            # Aggregating the data by hour
-            df_cache_hit_hourly = df_cache_hit.groupby("hour")["total_hit_rate_per_5_minutes"].mean().reset_index()
+            # Assuming df_cache_hit is your DataFrame
+            df_cache_hit["minute"] = pd.to_datetime(df_cache_hit["minute"])
+            df_cache_hit["hour"] = df_cache_hit["minute"].dt.floor('H')
 
             # Plotting the data
             fig2, ax2 = plt.subplots(figsize=(10, 5))
-            ax2.plot(df_cache_hit_hourly["hour"].astype(str), df_cache_hit_hourly["total_hit_rate_per_5_minutes"], marker="o", linestyle="-", color="blue", label="Cache Hit Rate")
+            ax2.plot(df_cache_hit["minute"], df_cache_hit["total_hit_rate_per_5_minutes"], marker="o", linestyle="-", color="blue", label="Cache Hit Rate")
 
-            ax2.set_xlabel("Hours")
+            ax2.set_xlabel("Time (Minutes)")
             ax2.set_ylabel("Cache Hit Rate (%)")
             ax2.set_title("Cache Hit Rate Over Time")
             ax2.grid(True)
 
-            ax2.set_xticks(df_cache_hit_hourly["hour"].astype(str))
-            ax2.set_xticklabels(df_cache_hit_hourly["hour"].astype(str), rotation=45)
+            # Set x-axis ticks and labels to show every hour
+            hour_ticks = df_cache_hit["hour"].drop_duplicates().reset_index(drop=True)
+            tick_locs = df_cache_hit["minute"].dt.floor('H').drop_duplicates().index
+
+            ax2.set_xticks(df_cache_hit.loc[tick_locs, "minute"])
+            ax2.set_xticklabels(hour_ticks.astype(str), rotation=45)
 
             ax2.legend()
 
             # Display the plot
             graph2_placeholder.pyplot(fig2)
-            plt.close(fig2)   # ✅ Fix: Close figure to free memory
+            plt.close(fig2)
         else:
             graph2_placeholder.warning("⚠️ No data available for Cache Hit Rate.")
 
