@@ -11,7 +11,7 @@ import pickle
 from scipy.optimize import curve_fit
 from sklearn.metrics import r2_score
 import numpy as np
-from datetime import date, timedelta
+from datetime import date, timedelta,datetime
 import time
 
 
@@ -257,7 +257,7 @@ if st.session_state.username == ADMIN_USER:
 
 st.sidebar.title(f"👋 Welcome, {st.session_state.username.capitalize()}")
 # st.sidebar.title("📊 TJW Redset Dashboard")
-page = st.sidebar.radio("Go to", ["Home", "Live Query Stream", "Trends", "Top-K Tables", "Cache Hit Rate", "Compile Time vs Joins"])
+page = st.sidebar.radio("Go to", ["Trends", "Live Query Stream", "Top-K Tables", "Cache Hit Rate", "Compile Time vs Joins"])
 
 # Sidebar - Filters
 st.sidebar.subheader("🔎 Filters")
@@ -289,32 +289,8 @@ query_type = st.sidebar.selectbox("Select Query Type (Optional)", query_type_opt
 # Treat the default "(Select Query Type)" as None
 query_type = None if query_type == "(Select Query Type)" else query_type
 
-# Dynamic Content Based on Selected Page
-if page == "Home":
-    # KPI Metrics Section
-    st.markdown("## 🚀 Key Metrics")
-    col1, col2, col3 = st.columns(3)
-    total_queries = run_async_query("SELECT COUNT(*) FROM redset_main")
-    total_queries_count = total_queries.iloc[0, 0]
-    col1.metric("Total Queries Processed", total_queries_count)
-    # Execute SQL query
-    cache_hit_rate_query = run_async_query("SELECT (SUM(was_cached) * 100.0) / COUNT(*) AS cache_hit_rate FROM redset_main")
 
-    # Extract value from the result
-    cache_hit_rate = cache_hit_rate_query.iloc[0, 0]  # Assuming it returns a DataFrame
-
-    # Display in Streamlit
-    col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
-    # Run SQL query to get the average compile time
-    avg_compile_time_query = run_async_query("SELECT COALESCE(compile_duration_ms, 0) AS avg_compile_time FROM redset_main")
-
-    # Extract value from the result
-    avg_compile_time = avg_compile_time_query.iloc[0, 0]  # Assuming it returns a DataFrame
-
-    # Display in Streamlit
-    col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
-
-elif page == "Trends":
+if page == "Trends":
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("<h4>📊 Was Cached Distribution</h4>", unsafe_allow_html=True)
@@ -435,101 +411,154 @@ elif page == "Trends":
             st.warning("Required columns not found in the dataset. Please check the data schema.")
 
 elif page == "Live Query Stream":
-    # st.title("📊 Live Query Stream")
+    # #########################
+    # # Key Metrics Start here
+    # #########################
 
-    # if start_date and end_date:
-    #     start_date_str = start_date.strftime('%Y-%m-%d')
-    #     end_date_str = end_date.strftime('%Y-%m-%d')
+    with st.container():
+        col1, col2, col3,col4 = st.columns(4)
 
-    #     query = f"""
-    #     SELECT 
-    #         date_trunc('day', rm.arrival_timestamp) AS day,
-    #         table_id,
-    #         rm.query_type,
-    #         rm.user_id,
-    #         COUNT(*) AS count,
-    #         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', rm.arrival_timestamp)) AS percentage,
-    #         COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS overall_percentage
-    #     FROM (
-    #         SELECT 
-    #             arrival_timestamp, 
-    #             unnest(string_to_array(read_table_ids, ',')) AS table_id,
-    #             query_type,
-    #             user_id
-    #         FROM redset_main
-    #         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
-    #         UNION ALL
-    #         SELECT 
-    #             arrival_timestamp, 
-    #             unnest(string_to_array(write_table_ids, ',')) AS table_id,
-    #             query_type,
-    #             user_id
-    #         FROM redset_main
-    #         WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
-    #     ) AS rm
-    #     GROUP BY day, table_id, rm.query_type, rm.user_id
-    #     ORDER BY count DESC
-    #     LIMIT 50;
-    #     """
-    # else:
-    #     query = "SELECT * FROM public.top_k_tables_per_day LIMIT 50"
+        # Fetch data dynamically
+        total_queries = run_async_query("SELECT COUNT(*) FROM redset_main")
+        total_queries_count = total_queries.iloc[0, 0] if not total_queries.empty else 0
 
-    # # **Live Data Streaming Section**
-    # placeholder = st.empty()  # Placeholder for real-time updates
+        cache_hit_rate_query = run_async_query(
+            "SELECT (SUM(was_cached) * 100.0) / COUNT(*) AS cache_hit_rate FROM redset_main"
+        )
+        cache_hit_rate = cache_hit_rate_query.iloc[0, 0] if not cache_hit_rate_query.empty else 0.0
 
-    # # Refresh Rate Selection
-    # refresh_rate = st.slider("Refresh Interval (seconds)", 1, 30, 10)
-    # top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
-    # while True:
-    #     df = run_async_query(query)
+        avg_compile_time_query = run_async_query(
+            "SELECT AVG(compile_duration_ms) AS avg_compile_time FROM redset_main WHERE compile_duration_ms IS NOT NULL AND compile_duration_ms != 'NaN';"
+        )
+        avg_compile_time = avg_compile_time_query.iloc[0, 0] if not avg_compile_time_query.empty else 0.0
 
-    #     if not df.empty:
-    #         df_grouped = df.groupby('table_id')[['count', 'percentage']].sum().reset_index()
-    #         df_grouped = df_grouped.sort_values(by='count', ascending=False)
+        # latest_query_date_query = run_async_query(
+        # "SELECT MAX(DATE(arrival_timestamp)) AS latest_query_date FROM redset_main;"
+        # )
+        # latest_query_date = latest_query_date_query.iloc[0, 0] if not latest_query_date_query.empty else "N/A"
 
-    #         # Calculate overall percentage for the date range
-    #         total_count = df_grouped['count'].sum()
-    #         df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
+    
+        # if isinstance(latest_query_date, (datetime, date)):  
+        #     latest_query_date_str = latest_query_date.strftime("%Y-%m-%d")  # Convert to YYYY-MM-DD
+        # else:
+        #     latest_query_date_str = str(latest_query_date)  # Ensure it's a string
 
-    #         # Limit to top_k tables
-    #         df_grouped = df_grouped.head(top_k)
+        # ✅ Force conversion to string again for safety
+        # latest_query_date_str = str(latest_query_date_str)
 
-    #         # Plot Data
-    #         fig, ax = plt.subplots(figsize=(10, 6))
-    #         bars = ax.bar(df_grouped['table_id'], df_grouped['count'])
+        # Display metrics inside respective columns
+        col1.metric("Total Queries Processed", total_queries_count)
+        col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
+        col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
+        # col4.metric("Latest Query Date", latest_query_date_str)
 
-    #         ax.set_xlabel('Table ID')
-    #         ax.set_ylabel('Query Count')
-    #         ax.set_title('Top K Tables')
-    #         ax.set_xticklabels(df_grouped['table_id'], rotation=90)
 
-    #         # Display percentage on top of bars diagonally
-    #         for bar, percentage in zip(bars, df_grouped['overall_percentage']):
-    #             ax.text(
-    #                 bar.get_x() + bar.get_width() / 2,
-    #                 bar.get_height(),
-    #                 f'{percentage:.2f}%',
-    #                 ha='center',
-    #                 va='bottom',
-    #                 rotation=45
-    #             )
 
-    #         # Update the Streamlit UI dynamically
-    #         with placeholder:
-    #             st.pyplot(fig)
-    #             st.write(f"🔄 Last updated: {time.strftime('%H:%M:%S')}")
-
-    #     else:
-    #         with placeholder:
-    #             st.warning("⚠️ No data available for the selected date range.")
-
-    #     time.sleep(refresh_rate)  # Wait for the specified refresh interval
+    ####################
+    # Live Insights Panel
+    ####################
+    graph1_placeholder = st.empty()
     graph2_placeholder = st.empty()
     graph3_placeholder = st.empty()
 
+    collive1, collive2,collive3 = st.columns(3)
+
     # Refresh Rate Selector
-    refresh_rate = st.slider("Refresh Interval (seconds)", 1, 30, 5)
+    # refresh_rate = st.slider("Refresh Interval (seconds)", 1, 30, 5)
+    refresh_rate = 2
+
+    with collive1:
+        container1 = st.container()  # ✅ Use container to avoid multiple graphs
+
+    with collive2:
+        container2 = st.container()  # ✅ Use container for the second graph
+
+    with collive3:
+        container3 = st.container()  # ✅ Use container for the third graph
+
+    ####################
+    # Top-K Tables Live
+    ####################
+    # Define the SQL query exactly as provided
+    query = """
+    WITH last_day AS (
+        SELECT date_trunc('day', MAX(arrival_timestamp)) AS day
+        FROM public."redset_main"
+    ),
+    table_usage AS (
+        SELECT 
+            unnest(string_to_array(read_table_ids || ',' || write_table_ids, ',')) AS table_id
+        FROM public."redset_main", last_day
+        WHERE date_trunc('day', arrival_timestamp) = last_day.day
+    ),
+    table_count AS (
+        SELECT 
+            table_id,
+            COUNT(*) AS count
+        FROM table_usage
+        GROUP BY table_id
+    ),
+    total_count AS (
+        SELECT SUM(count) AS overall_total FROM table_count
+    )
+    SELECT 
+        tc.table_id, 
+        tc.count,
+        (tc.count::double precision / NULLIF(tc_total.overall_total, 0) * 100) AS overall_percentage
+    FROM table_count tc, total_count tc_total
+    ORDER BY tc.count DESC;
+    """
+
+    # Fetch Data
+    df = run_async_query(query)
+
+    if not df.empty:
+        # Let the user select how many top tables to display
+        top_k = st.number_input("Select the number of top tables to view", min_value=1, max_value=50, value=10)
+
+        # Ensure numeric conversion
+        df["count"] = pd.to_numeric(df["count"])
+        df["overall_percentage"] = pd.to_numeric(df["overall_percentage"])
+
+        # Sort by count in descending order
+        df_sorted = df.sort_values(by="count", ascending=False)
+
+        # Limit to top_k tables
+        df_top_k = df_sorted.head(top_k)
+
+        # Plot Data
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars = ax.bar(df_top_k['table_id'], df_top_k['count'])
+
+        ax.set_xlabel('Table ID')
+        ax.set_ylabel('Query Count')
+        ax.set_title('Top K Tables')
+        ax.set_xticks(range(len(df_top_k['table_id'])))
+        ax.set_xticklabels(df_top_k['table_id'], rotation=90)
+
+        # Display percentage on top of bars
+        for bar, percentage in zip(bars, df_top_k['overall_percentage']):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f'{percentage:.2f}%',
+                ha='center',
+                va='bottom',
+                rotation=45
+            )
+
+        # Show the plot in Streamlit
+        graph1_placeholder.pyplot(fig)
+        plt.close(fig)  # ✅ Close figure to prevent memory leaks
+
+    else:
+        st.write("⚠️ No data available for the selected date range.")
+
+    ####################
+    # Cache Hit Rate Live
+    ####################
     while True:
+        ### 🟢 Graph 1: Compile Time vs Number of Joins ###
         query_compile_time_vs_joins = f"""
         SELECT num_joins AS x, AVG(compile_duration_ms) AS y
         FROM public.redset_main
@@ -540,83 +569,69 @@ elif page == "Live Query Stream":
         ORDER BY num_joins;
         """
 
-        # Fetch Data
-        
-        df = run_async_query(query_compile_time_vs_joins)
+        df_joins = run_async_query(query_compile_time_vs_joins)
 
-        if not df.empty:
-            # Convert to numerical values for plotting
-            df["x"] = pd.to_numeric(df["x"])
-            df["y"] = pd.to_numeric(df["y"])
+        with container1:
+            if not df_joins.empty:
+                df_joins["x"] = pd.to_numeric(df_joins["x"])
+                df_joins["y"] = pd.to_numeric(df_joins["y"])
 
-            # Plot Data
-            fig, ax = plt.subplots(figsize=(8, 5))
-            ax.scatter(df["x"], df["y"], color="blue", alpha=0.6, label="Data Points")
+                fig1, ax1 = plt.subplots(figsize=(8, 5))
+                ax1.scatter(df_joins["x"], df_joins["y"], color="blue", alpha=0.6, label="Data Points")
 
-            ax.set_xlabel("Number of Joins")
-            ax.set_ylabel("Compile Duration (ms)")
-            ax.set_title("Compile Time vs Number of Joins")
-            ax.grid(True)
-            ax.legend()
+                ax1.set_xlabel("Number of Joins")
+                ax1.set_ylabel("Compile Duration (ms)")
+                ax1.set_title("Compile Time vs Number of Joins")
+                ax1.grid(True)
+                ax1.legend()
 
-            # Display plot in Streamlit
-            graph2_placeholder.pyplot(fig)
-            # plt.close(fig)
-            # st.pyplot(fig)
-        else:
-            st.warning("⚠️ No data available for Compile Time vs Number of Joins.")
-        if start_date and end_date:
-            start_date_str = start_date.strftime('%Y-%m-%d')
-            end_date_str = end_date.strftime('%Y-%m-%d')
-            
-            query = f"""
-                SELECT 
-                    date_trunc('day', arrival_timestamp) AS day,
-                    SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)) * 100.0 
-                    / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)), 0) AS total_hit_rate_per_day
-                FROM redset_main
-                WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}'
-                GROUP BY day
-                ORDER BY day;
-            """
-        else:
-            query = """
-                SELECT 
-                    date_trunc('day', arrival_timestamp) AS day,
-                    SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)) * 100.0 
-                    / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('day', arrival_timestamp)), 0) AS total_hit_rate_per_day
-                FROM redset_main
-                GROUP BY day
-                ORDER BY day;
-            """
+                graph2_placeholder.pyplot(fig1)
+                plt.close(fig1)  # ✅ Fix: Close figure to free memory
+            else:
+                graph2_placeholder.warning("⚠️ No data available for Compile Time vs Number of Joins.")
 
-        # Fetch Data
-        df = run_async_query(query)
+        ### 🟢 Graph 2: Cache Hit Rate Over Time ###
+        query_cache_hit_rate = f"""
+        SELECT 
+            date_trunc('hour', arrival_timestamp) AS hour,  -- ✅ Change granularity to hours
+            SUM(COUNT(*) FILTER (WHERE was_cached = 1)) OVER (PARTITION BY date_trunc('hour', arrival_timestamp)) * 100.0 
+            / NULLIF(SUM(COUNT(*)) OVER (PARTITION BY date_trunc('hour', arrival_timestamp)), 0) AS total_hit_rate_per_hour
+        FROM redset_main
+        -- WHERE arrival_timestamp BETWEEN '{start_date}' AND '{end_date}'
+        GROUP BY hour
+        ORDER BY hour;
+        """
 
-        if not df.empty:
-            # Convert "day" to string (for cleaner x-axis labels)
-            df["day"] = df["day"].astype(str)
+        df_cache_hit = run_async_query(query_cache_hit_rate)
 
-            # Plot Data
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(df["day"], df["total_hit_rate_per_day"], marker="o", linestyle="-", color="blue", label="Cache Hit Rate")
-            ax.set_xlabel("Date")
-            ax.set_ylabel("Cache Hit Rate (%)")
-            ax.set_title("Cache Hit Rate Over Time")
-            ax.grid(True)
+        with container2:
+            if not df_cache_hit.empty:
+                df_cache_hit["hour"] = df_cache_hit["hour"].astype(str)
 
-            # Set only dates (remove time component)
-            ax.set_xticks(df["day"])  # Set the ticks to be the date values
-            ax.set_xticklabels(df["day"], rotation=45)  # Rotate for better readability
-            
-            ax.legend()
+                fig2, ax2 = plt.subplots(figsize=(10, 5))
+                ax2.plot(df_cache_hit["hour"], df_cache_hit["total_hit_rate_per_hour"], marker="o", linestyle="-", color="blue", label="Cache Hit Rate")
 
-            # Display plot in Streamlit
-            graph2_placeholder.pyplot(fig)
-            plt.close(fig)
-        else:
-            st.warning("⚠️ No data available for the selected date range.")
+                ax2.set_xlabel("Hours")
+                ax2.set_ylabel("Cache Hit Rate (%)")
+                ax2.set_title("Cache Hit Rate Over Time")
+                ax2.grid(True)
 
+                ax2.set_xticks(df_cache_hit["hour"])
+                ax2.set_xticklabels(df_cache_hit["hour"], rotation=45)
+
+                ax2.legend()
+
+                graph3_placeholder.pyplot(fig2)
+                plt.close(fig2)  # ✅ Fix: Close figure to free memory
+            else:
+                graph3_placeholder.warning("⚠️ No data available for Cache Hit Rate.")
+
+        ### 🔄 Refresh interval (only updates graphs, no full-page refresh) ###
+        time.sleep(refresh_rate)
+
+###############
+# Top-K Tables
+###############
 elif page == "Top-K Tables":
     st.title("📊 Top K Tables")
 
@@ -625,7 +640,7 @@ elif page == "Top-K Tables":
         end_date_str = end_date.strftime('%Y-%m-%d')
         query = f"""
         SELECT * FROM public.top_k_tables_per_day 
-        WHERE arrival_timestamp BETWEEN '{start_date_str}' AND '{end_date_str}';
+        WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}';
         """
     else:
         query = "SELECT * FROM public.top_k_tables_per_day"
