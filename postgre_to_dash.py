@@ -170,20 +170,20 @@ def inverse_log_transform(y_log):
     return np.expm1(y_log)  # exp(y) - 1
 
 # Database Configuration
-# DB_CONFIG = {
-#     'user': 'sagnik',
-#     'password': 'sagnik',
-#     'host': '192.168.127.138',
-#     'port': '5432',
-#     'database': 'de_project_main'
-# }
 DB_CONFIG = {
-    'user': 'postgres',
-    'password': 'postgres',
-    'host': 'localhost',
+    'user': 'sagnik',
+    'password': 'sagnik',
+    'host': 'localhost', #192.168.127.138 - Goutham IP
     'port': '5432',
-    'database': 'redset'
+    'database': 'de_project_main'
 }
+# DB_CONFIG = {
+#     'user': 'postgres',
+#     'password': 'postgres',
+#     'host': 'localhost',
+#     'port': '5432',
+#     'database': 'redset'
+# }
 
 # Function to fetch PostgreSQL data
 def run_async_query(query: str):
@@ -257,7 +257,7 @@ if st.session_state.username == ADMIN_USER:
 
 st.sidebar.title(f"👋 Welcome, {st.session_state.username.capitalize()}")
 # st.sidebar.title("📊 TJW Redset Dashboard")
-page = st.sidebar.radio("Go to", ["Trends", "Live Query Stream", "Top-K Tables", "Cache Hit Rate", "Compile Time vs Joins"])
+page = st.sidebar.radio("Go to", ["Trends", "Live Query Stream", "Top-K Tables", "Top-K Query", "Cache Hit Rate", "Compile Time vs Joins"])
 
 # Sidebar - Filters
 st.sidebar.subheader("🔎 Filters")
@@ -276,10 +276,10 @@ else:
     st.stop()  # Stop execution until the user provides both dates
 
 # Number input for User ID (default is None)
-user_id = st.sidebar.number_input("Enter User ID (Optional)", min_value=1, step=1, format="%d", value=None)
+user_id = st.sidebar.number_input("Enter User ID (Optional)", min_value=0, step=1, format="%d", value=None)
 
 # Convert None to empty string for handling cases
-user_id = int(user_id) if user_id else None
+user_id = int(user_id) if user_id is not None else None
 
 query_type_options = ["(Select Query Type)", "delete", "update", "unload", "vacuum", "analyze", "other", "select", "copy", "ctas", "insert"]
 
@@ -432,10 +432,10 @@ elif page == "Live Query Stream":
         )
         avg_compile_time = avg_compile_time_query.iloc[0, 0] if not avg_compile_time_query.empty else 0.0
 
-        # latest_query_date_query = run_async_query(
-        # "SELECT MAX(DATE(arrival_timestamp)) AS latest_query_date FROM redset_main;"
-        # )
-        # latest_query_date = latest_query_date_query.iloc[0, 0] if not latest_query_date_query.empty else "N/A"
+        latest_query_date_query = run_async_query(
+        "SELECT MAX(DATE(arrival_timestamp)) AS latest_query_date FROM redset_main;"
+        )
+        latest_query_date = latest_query_date_query.iloc[0, 0] if not latest_query_date_query.empty else "N/A"
 
     
         # if isinstance(latest_query_date, (datetime, date)):  
@@ -444,13 +444,13 @@ elif page == "Live Query Stream":
         #     latest_query_date_str = str(latest_query_date)  # Ensure it's a string
 
         # ✅ Force conversion to string again for safety
-        # latest_query_date_str = str(latest_query_date_str)
+        latest_query_date_str = str(latest_query_date)
 
         # Display metrics inside respective columns
         col1.metric("Total Queries Processed", total_queries_count)
         col2.metric("Cache Hit Rate (%)", f"{cache_hit_rate:.2f}")
         col3.metric("Average Compile Time (ms)", f"{avg_compile_time:.2f}")
-        # col4.metric("Latest Query Date", latest_query_date_str)
+        col4.metric("Latest Query Date", latest_query_date_str)
 
 
 
@@ -640,11 +640,20 @@ elif page == "Top-K Tables":
         end_date_str = end_date.strftime('%Y-%m-%d')
         query = f"""
         SELECT * FROM public.top_k_tables_per_day 
-        WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}';
+        WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}'
         """
+        # Add query_type filter if it's not None or 'All'
+        if query_type and query_type != 'All':
+            query += f" AND query_type = '{query_type}'"
+
+        # Add user_id filter if it's not None or 'All'
+        if user_id is not None and user_id != 'All':
+            query += f" AND user_id = '{user_id}'"
+
     else:
         query = "SELECT * FROM public.top_k_tables_per_day"
-
+    
+    query += ";"
     # Fetch Data
     df = run_async_query(query)
 
@@ -685,6 +694,80 @@ elif page == "Top-K Tables":
     else:
         st.write("⚠️ No data available for the selected date range.")
 
+#################
+# Top Query Type
+#################
+
+elif page == "Top-K Query":
+    st.title("📊 Top K Query")
+
+    if start_date and end_date:
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        query = f"""
+        SELECT * FROM public.top_k_queries_per_day 
+        WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}'
+        """
+        # Add query_type filter if it's not None or 'All'
+        # if query_type and query_type != 'All':
+        #     query += f" AND query_type = '{query_type}'"
+
+        # Add user_id filter if it's not None or 'All'
+        if user_id is not None and user_id != 'All':
+            query += f" AND user_id = '{user_id}'"
+
+    else:
+        query = "SELECT * FROM public.top_k_queries_per_day"
+    
+    query += ";"
+    # Fetch Data
+    df = run_async_query(query)
+
+    if not df.empty:
+        # Let the user select how many top tables to display
+        top_k = st.number_input("Select the number of top Queries to view", min_value=1, max_value=50, value=10)
+
+        df_grouped = df.groupby('query_type')[['count', 'daily_percentage']].sum().reset_index()
+        df_grouped = df_grouped.sort_values(by='count', ascending=False)
+
+        # Calculate overall percentage for the date range
+        total_count = df_grouped['count'].sum()
+        df_grouped['overall_percentage'] = (df_grouped['count'] / total_count) * 100
+
+        # Limit to top_k tables
+        df_grouped = df_grouped.head(top_k)
+
+        plt.figure(figsize=(10, 6))
+        plt.pie(
+            df_grouped['count'],
+            labels=df_grouped['query_type'],
+            autopct='%1.1f%%',
+            startangle=140
+        )
+        plt.title('Top K Queries')
+        plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+        plt.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+        # Display total queries at the bottom right
+        plt.annotate(
+            f'Total Queries: {total_count}',
+            xy=(0.95, 0.05),
+            xycoords='axes fraction',
+            ha='right',
+            va='bottom',
+            fontsize=12,
+            bbox=dict(boxstyle='round,pad=0.3', edgecolor='black', facecolor='white')
+        )
+
+        st.pyplot(plt)
+
+    else:
+        st.write("⚠️ No data available for the selected date range.")
+
+
+#####################
+## Cache Hit Rate
+#####################
 
 elif page == "Cache Hit Rate":
     st.markdown("## ⚡ Cache Hit Rate Over Time Range")
@@ -695,6 +778,17 @@ elif page == "Cache Hit Rate":
             SELECT day::date AS day, SUM(hit_rate_per_day) AS cache_hit_rate
             FROM public.hit_rate_per_day
             WHERE day BETWEEN '{start_date_str}' AND '{end_date_str}'
+        """
+
+        # Add query_type filter if it's not None or 'All'
+        if query_type and query_type != 'All':
+            query += f" AND query_type = '{query_type}'"
+
+        # Add user_id filter if it's not None or 'All'
+        if user_id is not None and user_id != 'All':
+            query += f" AND user_id = '{user_id}'"
+
+        query +="""
             GROUP BY day
             ORDER BY day ASC;
         """
