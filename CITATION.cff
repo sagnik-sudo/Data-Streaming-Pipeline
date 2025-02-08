@@ -1,0 +1,16 @@
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the following metadata."
+title: "Data-Streaming-Pipeline"
+date-released: "2025-02-03"
+url: "https://github.com/sagnik-sudo/Data-Streaming-Pipeline"
+authors:
+  - family-names: Das
+    given-names: Sagnik
+  - family-names: Abid
+    given-names: Muhid
+  - family-names: Muralikrishnan
+    given-names: Goutham
+  - family-names: Paul
+    given-names: Pranjaly
+  - family-names: Marotikkal
+    given-names: Aswathy
